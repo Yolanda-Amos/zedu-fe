@@ -4,52 +4,77 @@ import React, { useState, useEffect } from "react";
 import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
 import {
-  Mail,
+  ExternalLink,
   Copy,
   Check,
   Sparkles,
   Clock,
+  ShieldCheck,
   Search,
   Trash2,
   PlusCircle,
 } from "lucide-react";
 import { showSuccess, showError } from "~/components/toast/sonner";
-import {
-  ContributorSubmission,
-  getContributors,
-  addContributor,
-  CONTRIBUTORS_STORAGE_KEY,
-} from "~/lib/contributors-store";
 import { DynamicFooter } from "../../_components/footer/dynamic-footer";
 
-export default function ZeduFlamingoBoardPage() {
+export interface ContributorRecord {
+  id: string;
+  fullName: string;
+  zeduUsername: string;
+  githubRepoUrl: string;
+  submittedAt: string;
+}
+
+const STORAGE_KEY = "zedu_flamingo_contributors";
+
+const DEFAULT_CONTRIBUTORS: ContributorRecord[] = [
+  {
+    id: "flam-1",
+    fullName: "Timothy Mayor",
+    zeduUsername: "timothymayor",
+    githubRepoUrl: "https://github.com/timothymayor/zedu-fe",
+    submittedAt: "2026-09-28T14:32:00.000Z",
+  },
+  {
+    id: "flam-2",
+    fullName: "Layo Bright",
+    zeduUsername: "layobright",
+    githubRepoUrl: "https://github.com/zedu-hng/zedu-fe",
+    submittedAt: "2026-09-29T10:15:00.000Z",
+  },
+  {
+    id: "flam-3",
+    fullName: "Alex Chen",
+    zeduUsername: "alexchen",
+    githubRepoUrl: "https://github.com/alexchen/zedu-workflow-engine",
+    submittedAt: "2026-09-30T09:45:00.000Z",
+  },
+];
+
+export default function FlamingoBoardPage() {
   const [fullName, setFullName] = useState("");
   const [zeduUsername, setZeduUsername] = useState("");
-  const [emailAddress, setEmailAddress] = useState("");
+  const [githubRepoUrl, setGithubRepoUrl] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
-  const [contributors, setContributors] = useState<ContributorSubmission[]>([]);
+  const [contributors, setContributors] = useState<ContributorRecord[]>(DEFAULT_CONTRIBUTORS);
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
-  // Load persisted contributors on mount
+  // Load persisted contributors from localStorage on mount
   useEffect(() => {
-    const load = () => {
-      const saved = getContributors();
-      setContributors(saved);
-    };
-
-    load();
-
-    const handleUpdate = () => {
-      load();
-    };
-
-    window.addEventListener("zedu_contributors_updated", handleUpdate);
-    window.addEventListener("storage", handleUpdate);
-
-    return () => {
-      window.removeEventListener("zedu_contributors_updated", handleUpdate);
-      window.removeEventListener("storage", handleUpdate);
-    };
+    try {
+      const savedData = localStorage.getItem(STORAGE_KEY);
+      if (savedData) {
+        const parsed = JSON.parse(savedData);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setContributors(parsed);
+          return;
+        }
+      }
+      // If no saved data, initialize storage with defaults
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(DEFAULT_CONTRIBUTORS));
+    } catch {
+      // fallback to state
+    }
   }, []);
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -57,7 +82,7 @@ export default function ZeduFlamingoBoardPage() {
 
     const trimmedName = fullName.trim();
     const trimmedUser = zeduUsername.trim().replace(/^@/, "");
-    const trimmedEmail = emailAddress.trim();
+    const trimmedUrl = githubRepoUrl.trim();
 
     if (!trimmedName) {
       showError("Please enter your full name");
@@ -67,40 +92,59 @@ export default function ZeduFlamingoBoardPage() {
       showError("Please enter your Zedu username");
       return;
     }
-    if (!trimmedEmail) {
-      showError("Please enter your email address");
+    if (!trimmedUrl) {
+      showError("Please enter your GitHub repository URL");
       return;
     }
 
-    // Add and persist
-    const newEntry = addContributor({
+    // Format url if missing protocol
+    let validUrl = trimmedUrl;
+    if (!validUrl.startsWith("http://") && !validUrl.startsWith("https://")) {
+      validUrl = `https://${validUrl}`;
+    }
+
+    const newEntry: ContributorRecord = {
+      id: `flam-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
       fullName: trimmedName,
       zeduUsername: trimmedUser,
-      emailAddress: trimmedEmail,
-    });
+      githubRepoUrl: validUrl,
+      submittedAt: new Date().toISOString(),
+    };
 
-    setContributors((prev) => [newEntry, ...prev]);
+    // Prepend to contributors list
+    const updatedList = [newEntry, ...contributors];
+    setContributors(updatedList);
 
-    // Reset inputs
+    // Persist to localStorage
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedList));
+      window.dispatchEvent(new Event("zedu_contributors_updated"));
+    } catch {
+      // ignore
+    }
+
+    // Reset form inputs
     setFullName("");
     setZeduUsername("");
-    setEmailAddress("");
+    setGithubRepoUrl("");
 
     showSuccess(`Successfully added "${trimmedName}" to the contributors table!`);
   };
 
-  const handleCopyEmail = (email: string, id: string) => {
-    navigator.clipboard.writeText(email);
+  const handleCopyUrl = (url: string, id: string) => {
+    navigator.clipboard.writeText(url);
     setCopiedId(id);
-    showSuccess("Email address copied to clipboard");
+    showSuccess("GitHub repository link copied to clipboard");
     setTimeout(() => setCopiedId(null), 2000);
   };
 
   const handleDelete = (id: string) => {
     const updated = contributors.filter((c) => c.id !== id);
     setContributors(updated);
-    if (typeof window !== "undefined") {
-      localStorage.setItem(CONTRIBUTORS_STORAGE_KEY, JSON.stringify(updated));
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+    } catch {
+      // ignore
     }
     showSuccess("Contributor record removed");
   };
@@ -111,7 +155,7 @@ export default function ZeduFlamingoBoardPage() {
     return (
       c.fullName.toLowerCase().includes(query) ||
       c.zeduUsername.toLowerCase().includes(query) ||
-      c.emailAddress.toLowerCase().includes(query)
+      c.githubRepoUrl.toLowerCase().includes(query)
     );
   });
 
@@ -179,14 +223,14 @@ export default function ZeduFlamingoBoardPage() {
 
             <div>
               <label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-neutral-700">
-                Email Address <span className="text-red-500">*</span>
+                GitHub Repo URL <span className="text-red-500">*</span>
               </label>
               <Input
-                type="email"
+                type="text"
                 required
-                placeholder="e.g. user@example.com"
-                value={emailAddress}
-                onChange={(e) => setEmailAddress(e.target.value)}
+                placeholder="https://github.com/..."
+                value={githubRepoUrl}
+                onChange={(e) => setGithubRepoUrl(e.target.value)}
                 className="w-full h-11 text-sm bg-neutral-50/50 border-neutral-300 focus:bg-white"
               />
             </div>
@@ -202,7 +246,7 @@ export default function ZeduFlamingoBoardPage() {
           </form>
         </div>
 
-        {/* Section 2: Table Section */}
+        {/* Section 2: Table Section (Always Visible) */}
         <div className="rounded-2xl border border-neutral-200 bg-white shadow-sm overflow-hidden">
           {/* Table Header Controls */}
           <div className="p-6 border-b border-neutral-100 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 bg-neutral-50/40">
@@ -211,7 +255,7 @@ export default function ZeduFlamingoBoardPage() {
                 Contributions Table ({contributors.length})
               </h2>
               <p className="text-xs text-neutral-500 mt-0.5">
-                Real-time output of all registered contributors and email addresses.
+                Real-time output of all submitted contributors and repository links.
               </p>
             </div>
 
@@ -222,7 +266,7 @@ export default function ZeduFlamingoBoardPage() {
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search by name, username, email..."
+                placeholder="Search by name, username, repo..."
                 className="w-full h-10 pl-9 pr-4 rounded-xl border border-neutral-200 bg-white text-xs text-neutral-800 placeholder:text-neutral-400 focus:outline-none focus:ring-2 focus:ring-[#7141F8]/30"
               />
             </div>
@@ -235,7 +279,7 @@ export default function ZeduFlamingoBoardPage() {
                 <tr className="border-b border-neutral-200 bg-neutral-100/70 text-xs font-bold text-neutral-700 uppercase tracking-wider">
                   <th className="py-4 px-6">Full Name</th>
                   <th className="py-4 px-6">Zedu Username</th>
-                  <th className="py-4 px-6">Email Address</th>
+                  <th className="py-4 px-6">GitHub Repo URL</th>
                   <th className="py-4 px-6">Date Submitted</th>
                   <th className="py-4 px-6 text-right">Actions</th>
                 </tr>
@@ -269,14 +313,16 @@ export default function ZeduFlamingoBoardPage() {
                         </span>
                       </td>
 
-                      {/* Email Address */}
+                      {/* GitHub Repo URL */}
                       <td className="py-4 px-6 max-w-sm truncate">
                         <a
-                          href={`mailto:${item.emailAddress}`}
-                          className="inline-flex items-center gap-1.5 text-xs font-medium text-[#7141F8] hover:underline"
+                          href={item.githubRepoUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1.5 text-xs font-mono font-medium text-[#7141F8] hover:underline"
                         >
-                          <Mail className="h-3.5 w-3.5 shrink-0 text-neutral-400" />
-                          <span className="truncate">{item.emailAddress}</span>
+                          <span className="truncate">{item.githubRepoUrl}</span>
+                          <ExternalLink className="h-3.5 w-3.5 shrink-0 text-neutral-400" />
                         </a>
                       </td>
 
@@ -301,8 +347,8 @@ export default function ZeduFlamingoBoardPage() {
                         <div className="inline-flex items-center gap-1.5 justify-end">
                           <button
                             type="button"
-                            onClick={() => handleCopyEmail(item.emailAddress, item.id)}
-                            title="Copy Email Address"
+                            onClick={() => handleCopyUrl(item.githubRepoUrl, item.id)}
+                            title="Copy GitHub URL"
                             className="p-2 rounded-lg hover:bg-neutral-100 text-neutral-500 hover:text-neutral-900 transition-colors"
                           >
                             {copiedId === item.id ? (
